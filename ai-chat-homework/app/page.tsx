@@ -10,6 +10,8 @@ type Message = {
   content: string;
 };
 
+const TARGET_RATIO = 0.3;
+
 export default function HomePage() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([
@@ -23,17 +25,97 @@ export default function HomePage() {
   );
   const [temperature, setTemperature] = useState(0.7);
   const [topP, setTopP] = useState(1);
-  const [maxTokens, setMaxTokens] = useState(500);
+  const [maxTokens, setMaxTokens] = useState(300);
   const [streaming, setStreaming] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+  const [darkMode, setDarkMode] = useState(false);
 
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const isProgrammaticScrollRef = useRef(false);
 
   const scrollToBottom = () => {
     const el = chatContainerRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
+  };
+
+  const getMessageElements = () => {
+    const container = chatContainerRef.current;
+    if (!container) return [];
+
+    return Array.from(
+      container.querySelectorAll<HTMLElement>("[data-message-id]")
+    );
+  };
+
+  const getCurrentMessageIndexByViewport = () => {
+    const container = chatContainerRef.current;
+    if (!container) return -1;
+
+    const messageElements = getMessageElements();
+    if (messageElements.length === 0) return -1;
+
+    const containerRect = container.getBoundingClientRect();
+    const targetY = containerRect.top + container.clientHeight * 0.31;
+
+    let closestIndex = -1;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    messageElements.forEach((el, index) => {
+      const rect = el.getBoundingClientRect();
+      const distance = Math.abs(rect.top - targetY);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = index;
+      }
+    });
+
+    return closestIndex;
+  };
+
+  const scrollMessageToTargetPosition = (targetIndex: number) => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    const messageElements = getMessageElements();
+    if (messageElements.length === 0) return;
+    if (targetIndex < 0 || targetIndex >= messageElements.length) return;
+
+    const targetEl = messageElements[targetIndex];
+    const targetScrollTop =
+      targetEl.offsetTop - container.clientHeight * TARGET_RATIO;
+
+    isProgrammaticScrollRef.current = true;
+    setCurrentMessageIndex(targetIndex);
+
+    container.scrollTo({
+      top: Math.max(0, targetScrollTop),
+      behavior: "smooth",
+    });
+
+    window.setTimeout(() => {
+      isProgrammaticScrollRef.current = false;
+    }, 300);
+  };
+
+  const handleJumpPrevious = () => {
+    if (currentMessageIndex <= 0) return;
+    scrollMessageToTargetPosition(currentMessageIndex - 1);
+  };
+
+  const handleJumpNext = () => {
+    const messageElements = getMessageElements();
+    if (
+      currentMessageIndex < 0 ||
+      currentMessageIndex >= messageElements.length - 1
+    ) {
+      return;
+    }
+
+    scrollMessageToTargetPosition(currentMessageIndex + 1);
   };
 
   const handleScroll = () => {
@@ -44,6 +126,13 @@ export default function HomePage() {
       el.scrollHeight - el.scrollTop - el.clientHeight;
 
     shouldAutoScrollRef.current = distanceFromBottom < 80;
+
+    if (isProgrammaticScrollRef.current) return;
+
+    const index = getCurrentMessageIndexByViewport();
+    if (index !== -1) {
+      setCurrentMessageIndex(index);
+    }
   };
 
   useEffect(() => {
@@ -51,6 +140,12 @@ export default function HomePage() {
       scrollToBottom();
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (messages.length > 0 && currentMessageIndex >= messages.length) {
+      setCurrentMessageIndex(messages.length - 1);
+    }
+  }, [messages.length, currentMessageIndex]);
 
   const handleSend = async () => {
     const trimmedInput = input.trim();
@@ -170,28 +265,73 @@ export default function HomePage() {
   };
 
   const previewMessages = [
-    ...messages.slice(-6),
+    ...messages.slice(-4),
     ...(input.trim()
       ? [{ role: "user" as const, content: input.trim() }]
       : []),
   ];
 
   return (
-    <main className="min-h-screen bg-gray-100 text-gray-900">
+    <main
+      className={`min-h-screen ${
+        darkMode ? "bg-gray-950 text-gray-100" : "bg-gray-100 text-gray-900"
+      }`}
+    >
       <div className="mx-auto flex max-w-7xl gap-6 p-6">
-        <section className="flex flex-1 flex-col rounded-2xl bg-white p-4 shadow">
+        <section
+          className={`relative flex flex-1 flex-col rounded-2xl p-4 shadow ${
+            darkMode ? "bg-gray-900" : "bg-white"
+          }`}
+        >
           <h1 className="mb-4 text-2xl font-bold">My ChatGPT</h1>
+
+          <div className="absolute right-4 top-4 flex gap-2">
+            <button
+              type="button"
+              onClick={handleJumpPrevious}
+              className={`flex h-9 w-9 items-center justify-center rounded-full border text-sm shadow transition ${
+                darkMode
+                  ? "border-gray-600 bg-gray-800 text-gray-100 hover:bg-gray-700"
+                  : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50"
+              }`}
+              aria-label="Jump to previous message"
+              title="Previous message"
+            >
+              ↑
+            </button>
+
+            <button
+              type="button"
+              onClick={handleJumpNext}
+              className={`flex h-9 w-9 items-center justify-center rounded-full border text-sm shadow transition ${
+                darkMode
+                  ? "border-gray-600 bg-gray-800 text-gray-100 hover:bg-gray-700"
+                  : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50"
+              }`}
+              aria-label="Jump to next message"
+              title="Next message"
+            >
+              ↓
+            </button>
+          </div>
 
           <div
             ref={chatContainerRef}
             onScroll={handleScroll}
-            className="mb-4 h-[70vh] overflow-y-auto rounded-xl border bg-gray-50 p-4"
+            className={`mb-4 h-[70vh] overflow-y-auto rounded-xl border p-4 ${
+              darkMode
+                ? "border-gray-700 bg-gray-950"
+                : "border-gray-200 bg-gray-50"
+            }`}
           >
             {messages.map((message, index) => (
               <ChatMessage
                 key={index}
+                messageId={`message-${index}`}
                 role={message.role}
                 content={message.content}
+                isCurrent={index === currentMessageIndex}
+                darkMode={darkMode}
               />
             ))}
           </div>
@@ -199,6 +339,7 @@ export default function HomePage() {
           <ChatInput
             value={input}
             disabled={isGenerating}
+            darkMode={darkMode}
             onChange={setInput}
             onSend={handleSend}
           />
@@ -211,6 +352,7 @@ export default function HomePage() {
           topP={topP}
           maxTokens={maxTokens}
           streaming={streaming}
+          darkMode={darkMode}
           previewMessages={previewMessages}
           conversationSummary={conversationSummary}
           onModelChange={setModel}
@@ -219,6 +361,7 @@ export default function HomePage() {
           onTopPChange={setTopP}
           onMaxTokensChange={setMaxTokens}
           onStreamingChange={setStreaming}
+          onDarkModeChange={setDarkMode}
         />
       </div>
     </main>
