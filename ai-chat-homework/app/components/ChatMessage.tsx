@@ -5,6 +5,7 @@ type ChatMessageProps = {
   role: "user" | "assistant";
   content: string;
   messageId: string;
+  modelName?: string;
   isCurrent?: boolean;
   darkMode: boolean;
 };
@@ -13,6 +14,7 @@ export default function ChatMessage({
   role,
   content,
   messageId,
+  modelName,
   isCurrent = false,
   darkMode,
 }: ChatMessageProps) {
@@ -28,8 +30,8 @@ export default function ChatMessage({
 
   const currentStyle = isCurrent
     ? darkMode
-      ? "shadow-[0_0_0_3px_rgba(96,165,250,0.35),0_10px_25px_rgba(0,0,0,0.35)]"
-      : "shadow-[0_0_0_3px_rgba(59,130,246,0.25),0_10px_25px_rgba(0,0,0,0.12)]"
+      ? "ring-2 ring-blue-400/70 shadow-[0_10px_25px_rgba(0,0,0,0.35)]"
+      : "ring-2 ring-blue-500/50 shadow-[0_10px_25px_rgba(0,0,0,0.18)]"
     : "";
 
   return (
@@ -38,7 +40,7 @@ export default function ChatMessage({
       className={`mb-3 rounded-xl p-3 transition-shadow ${baseStyle} ${currentStyle}`}
     >
       <p className="mb-2 text-sm font-semibold">
-        {isUser ? "User" : "Assistant"}
+        {isUser ? "User" : modelName || "Assistant"}
       </p>
 
       <div

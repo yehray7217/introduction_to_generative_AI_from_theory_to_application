@@ -8,18 +8,13 @@ import SettingsPanel from "./components/SettingsPanel";
 type Message = {
   role: "user" | "assistant";
   content: string;
+  modelName?: string;
 };
 
 const TARGET_RATIO = 0.3;
 
 export default function HomePage() {
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", content: "Hi! I am your AI assistant." },
-  ]);
-  const [conversationSummary, setConversationSummary] = useState("");
-
-  const [model, setModel] = useState("openai/gpt-oss-120b");
+  const [model, setModel] = useState("meta/llama-3.1-70b-instruct");
   const [systemPrompt, setSystemPrompt] = useState(
     "You are a helpful assistant."
   );
@@ -27,9 +22,19 @@ export default function HomePage() {
   const [topP, setTopP] = useState(1);
   const [maxTokens, setMaxTokens] = useState(300);
   const [streaming, setStreaming] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [input, setInput] = useState("");
+  const [conversationSummary, setConversationSummary] = useState("");
+  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: "assistant",
+      content: "Hi! I am your AI assistant.",
+      modelName: "meta/llama-3.1-70b-instruct",
+    },
+  ]);
 
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -50,7 +55,7 @@ export default function HomePage() {
     );
   };
 
-  const getCurrentMessageIndexByViewport = () => {
+  const getCurrentMessageIndex = () => {
     const container = chatContainerRef.current;
     if (!container) return -1;
 
@@ -102,20 +107,19 @@ export default function HomePage() {
   };
 
   const handleJumpPrevious = () => {
-    if (currentMessageIndex <= 0) return;
-    scrollMessageToTargetPosition(currentMessageIndex - 1);
+    const currentIndex = currentMessageIndex;
+    if (currentIndex <= 0) return;
+
+    scrollMessageToTargetPosition(currentIndex - 1);
   };
 
   const handleJumpNext = () => {
     const messageElements = getMessageElements();
-    if (
-      currentMessageIndex < 0 ||
-      currentMessageIndex >= messageElements.length - 1
-    ) {
-      return;
-    }
+    const currentIndex = currentMessageIndex;
 
-    scrollMessageToTargetPosition(currentMessageIndex + 1);
+    if (currentIndex < 0 || currentIndex >= messageElements.length - 1) return;
+
+    scrollMessageToTargetPosition(currentIndex + 1);
   };
 
   const handleScroll = () => {
@@ -129,7 +133,7 @@ export default function HomePage() {
 
     if (isProgrammaticScrollRef.current) return;
 
-    const index = getCurrentMessageIndexByViewport();
+    const index = getCurrentMessageIndex();
     if (index !== -1) {
       setCurrentMessageIndex(index);
     }
@@ -187,13 +191,16 @@ export default function HomePage() {
 
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: data.reply },
+          { role: "assistant", content: data.reply, modelName: model },
         ]);
         setConversationSummary((prev) => data.summary?.trim() || prev);
         return;
       }
 
-      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "", modelName: model },
+      ]);
 
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -247,6 +254,7 @@ export default function HomePage() {
                   next[next.length - 1] = {
                     role: "assistant",
                     content: accumulated,
+                    modelName: next[next.length - 1].modelName ?? model,
                   };
                   return next;
                 });
@@ -330,6 +338,7 @@ export default function HomePage() {
                 messageId={`message-${index}`}
                 role={message.role}
                 content={message.content}
+                modelName={message.modelName}
                 isCurrent={index === currentMessageIndex}
                 darkMode={darkMode}
               />

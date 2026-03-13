@@ -3,6 +3,7 @@ import { useState } from "react";
 type Message = {
   role: "user" | "assistant";
   content: string;
+  modelName?: string;
 };
 
 type SettingsPanelProps = {
@@ -103,6 +104,9 @@ export default function SettingsPanel({
             }`}
           >
             <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+            <option value="meta/llama-3.1-70b-instruct">meta/llama-3.1-70b-instruct</option>
+            <option value="microsoft/phi-3-small-128k-instruct">microsoft/phi-3-small-128k-instruct</option>
+            <option value="moonshotai/kimi-k2-instruct-0905">moonshotai/kimi-k2-instruct-0905</option>
           </select>
         </div>
 
