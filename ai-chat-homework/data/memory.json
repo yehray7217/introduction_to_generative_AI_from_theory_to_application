@@ -1,10 +1,18 @@
 [
   {
-    "id": "fdb8d5bb-4bad-4000-a12e-96ae5b55ead5",
+    "id": "17120058-95b1-4899-9444-261f278caba8",
+    "key": "i_like_to_play_football",
+    "value": "I like to play football",
+    "source": "manual",
+    "createdAt": "2026-04-29T15:29:21.304Z",
+    "updatedAt": "2026-04-29T15:29:21.304Z"
+  },
+  {
+    "id": "0a7e3d33-f101-4860-bf15-9e3f4df65293",
     "key": "remember_that_my_name_is_ray_and_i_prefer_concis",
     "value": "Remember that my name is Ray and I prefer concise answers.",
     "source": "tool",
-    "createdAt": "2026-04-29T15:23:33.880Z",
-    "updatedAt": "2026-04-29T15:23:33.880Z"
+    "createdAt": "2026-04-29T15:28:54.369Z",
+    "updatedAt": "2026-04-29T15:28:54.369Z"
   }
 ]

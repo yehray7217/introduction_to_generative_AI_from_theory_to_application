@@ -509,6 +509,62 @@ async function runPlannedToolCall(
   }
 }
 
+function streamLocalToolReply({
+  reply,
+  summary,
+  routing,
+  toolCalls,
+}: {
+  reply: string;
+  summary: string;
+  routing: RoutingDecision;
+  toolCalls: ToolCallLog[];
+}) {
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ type: "routing", routing })}\n\n`
+        )
+      );
+
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ type: "toolCalls", toolCalls })}\n\n`
+        )
+      );
+
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ type: "token", token: reply })}\n\n`
+        )
+      );
+
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ type: "summary", summary })}\n\n`
+        )
+      );
+
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
+      );
+
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
+
 function missingConfigResponse() {
   return NextResponse.json(
     {
@@ -594,6 +650,15 @@ export async function POST(req: Request) {
 
   const localToolReply = getLocalToolReply(toolCalls);
   if (localToolReply && images.length === 0) {
+    if (streaming) {
+      return streamLocalToolReply({
+        reply: localToolReply,
+        summary,
+        routing,
+        toolCalls,
+      });
+    }
+
     return NextResponse.json({
       reply: localToolReply,
       summary,
