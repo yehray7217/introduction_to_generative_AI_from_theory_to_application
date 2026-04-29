@@ -1,4 +1,4 @@
-import { addMemory, searchMemories } from "./memory-store";
+import { addMemory, readMemories, searchMemories } from "./memory-store";
 import type { ToolCallLog } from "./types";
 
 function safeEvaluateExpression(expression: string) {
@@ -69,7 +69,27 @@ export async function runLocalTool(name: string, input: unknown): Promise<unknow
   }
 
   if (name === "search_memory") {
-    const query = typeof input === "object" && input && "query" in input ? String((input as { query: unknown }).query) : String(input ?? "");
+    const query =
+      typeof input === "object" && input && "query" in input
+        ? String((input as { query: unknown }).query)
+        : String(input ?? "");
+
+    const lowerQuery = query.toLowerCase();
+
+    const isGeneralMemoryQuestion =
+      lowerQuery.includes("what do you remember") ||
+      lowerQuery.includes("remember about me") ||
+      lowerQuery.includes("about me") ||
+      lowerQuery.includes("memory") ||
+      lowerQuery.includes("你記得") ||
+      lowerQuery.includes("記得我") ||
+      lowerQuery.includes("關於我") ||
+      lowerQuery.includes("記憶");
+
+    if (isGeneralMemoryQuestion) {
+      return readMemories();
+    }
+
     return searchMemories(query, 8);
   }
 

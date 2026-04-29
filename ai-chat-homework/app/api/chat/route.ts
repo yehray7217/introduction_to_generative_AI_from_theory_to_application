@@ -101,6 +101,16 @@ function buildFinalMessages({
     { role: "system", content: systemPrompt },
     {
       role: "system",
+      content: `
+  Available local MCP-style tools are strictly limited to:
+  1. calculator(expression): evaluate simple arithmetic expressions.
+  2. get_current_time(): get the current date and time in Asia/Taipei.
+  3. save_memory(key, value): save a long-term memory item.
+  4. search_memory(query): search saved long-term memory items.
+      `.trim(),
+    },
+    {
+      role: "system",
       content: `Short-term conversation summary:\n${updatedSummary || "(empty)"}`,
     },
     {
@@ -127,6 +137,194 @@ function buildFinalMessages({
   return finalMessages;
 }
 
+function getLocalToolReply(toolCalls: ToolCallLog[]): string | null {
+  const calculatorCall = toolCalls.find((call) => call.name === "calculator");
+  if (calculatorCall) {
+    const output = calculatorCall.output as { expression?: string; result?: number; error?: string };
+
+    if (output.error) {
+      return `Calculator error: ${output.error}`;
+    }
+
+    return `${output.expression} = ${output.result}`;
+  }
+
+  const saveMemoryCall = toolCalls.find((call) => call.name === "save_memory");
+  if (saveMemoryCall) {
+    const output = saveMemoryCall.output as { value?: string };
+    return `Saved to long-term memory: ${output.value ?? "memory item"}`;
+  }
+
+  const searchMemoryCall = toolCalls.find((call) => call.name === "search_memory");
+  if (searchMemoryCall) {
+    const output = searchMemoryCall.output as Array<{ key?: string; value?: string }>;
+
+    if (!Array.isArray(output) || output.length === 0) {
+      return "I do not have any saved long-term memory about you yet.";
+    }
+
+    const memories = output
+      .map((memory) => `- ${memory.value ?? memory.key ?? "memory item"}`)
+      .join("\n");
+
+    return `From my long-term memory, I remember:\n${memories}`;
+  }
+
+  const timeCall = toolCalls.find((call) => call.name === "get_current_time");
+  if (timeCall) {
+    const output = timeCall.output as { locale?: string; timeZone?: string };
+    return `Current time: ${output.locale ?? "unknown"}${output.timeZone ? ` (${output.timeZone})` : ""}`;
+  }
+
+  return null;
+}
+
+type RoutingDecision = {
+  taskType:
+    | "general"
+    | "vision"
+    | "coding"
+    | "math"
+    | "memory"
+    | "tool";
+  selectedModel: string;
+  reason: string;
+};
+
+function extractJsonObject(text: string) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+async function routeWithFastModel({
+  baseUrl,
+  apiKey,
+  text,
+  hasImages,
+  preferredModel,
+  fallbackRouting,
+}: {
+  baseUrl: string;
+  apiKey: string;
+  text: string;
+  hasImages: boolean;
+  preferredModel: string;
+  fallbackRouting: RoutingDecision;
+}): Promise<RoutingDecision> {
+  const fastModel = process.env.NVIDIA_FAST_MODEL ?? "meta/llama-3.1-8b-instruct";
+
+  const modelMap = {
+    general: process.env.NVIDIA_GENERAL_MODEL ?? process.env.NVIDIA_MODEL ?? preferredModel,
+    coding: process.env.NVIDIA_CODING_MODEL ?? process.env.NVIDIA_MODEL ?? preferredModel,
+    vision: process.env.NVIDIA_VISION_MODEL ?? "meta/llama-3.2-11b-vision-instruct",
+    math: process.env.NVIDIA_FAST_MODEL ?? fastModel,
+    memory: process.env.NVIDIA_FAST_MODEL ?? fastModel,
+    tool: process.env.NVIDIA_FAST_MODEL ?? fastModel,
+  };
+
+  try {
+    const routerReply = await callNvidiaChat({
+      baseUrl,
+      apiKey,
+      model: fastModel,
+      temperature: 0,
+      topP: 1,
+      maxTokens: 180,
+      messages: [
+        {
+          role: "system",
+          content: `
+You are a strict routing classifier for a chatbot.
+
+Your task is to classify the user's request into exactly one taskType.
+
+Available task types:
+- general: normal conversation, explanation, writing, summarization, brainstorming
+- vision: understanding or analyzing an attached image, such as describing an image, identifying objects, OCR, or answering questions about an uploaded image
+- coding: programming, debugging, software engineering, code explanation
+- math: arithmetic, formula-based calculation, numeric computation
+- memory: saving or retrieving long-term user memory, preferences, or personal facts
+- tool: requests that clearly require a local tool such as current time
+
+Return JSON only in this format:
+{
+  "taskType": "general | vision | coding | math | memory | tool",
+  "reason": "short reason"
+}
+
+Important classification rules:
+1. If the user is ASKING ABOUT the content of an uploaded image, choose "vision".
+2. If an image is attached and the user asks "what is in this image?", "describe this image", "read the text in this image", or similar, choose "vision".
+3. Do NOT choose "general" for image creation requests.
+4. Use "general" only for normal text conversation when none of the above categories fit.
+5. If the user asks to remember something or asks what you remember, choose "memory".
+6. If the user asks to calculate a numeric expression, choose "math".
+7. If the user asks about code or debugging, choose "coding".
+8. If the user asks for current time or another clear local tool action, choose "tool".
+
+Examples:
+- "What is in this image?" + hasImages=true => vision
+- "Describe this uploaded photo." + hasImages=true => vision
+- "Help me debug this TypeScript error." => coding
+- "Calculate 12345 * 6789." => math
+- "Remember that my name is Ray." => memory
+- "What do you remember about me?" => memory
+- "What time is it now?" => tool
+- "Introduce yourself briefly." => general
+
+You must output JSON only. Do not answer the user.
+          `.trim(),
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            userMessage: text,
+            hasImages,
+          }),
+        },
+      ],
+    });
+
+    const parsed = extractJsonObject(routerReply) as {
+      taskType?: RoutingDecision["taskType"];
+      reason?: string;
+    } | null;
+
+    const allowedTaskTypes: RoutingDecision["taskType"][] = [
+      "general",
+      "vision",
+      "coding",
+      "math",
+      "memory",
+      "tool",
+    ];
+
+    const taskType =
+      parsed?.taskType && allowedTaskTypes.includes(parsed.taskType)
+        ? parsed.taskType
+        : fallbackRouting.taskType;
+
+    return {
+      taskType,
+      selectedModel: modelMap[taskType],
+      reason: `Fast router model (${fastModel}) decision: ${
+        parsed?.reason ?? fallbackRouting.reason
+      }`,
+    };
+  } catch {
+    return {
+      ...fallbackRouting,
+      reason: `Fast router failed. Fallback heuristic used: ${fallbackRouting.reason}`,
+    };
+  }
+}
+
 function missingConfigResponse() {
   return NextResponse.json(
     {
@@ -144,13 +342,20 @@ export async function POST(req: Request) {
   const summary: string = body.summary ?? "";
   const recentMessages: ChatMessage[] = body.recentMessages ?? [];
   const images: ImageAttachment[] = body.images ?? [];
-  const preferredModel = body.model ?? process.env.NVIDIA_MODEL ?? "meta/llama-3.1-70b-instruct";
   const systemPrompt = body.systemPrompt ?? "You are a helpful assistant.";
   const temperature = body.temperature ?? 0.7;
   const topP = body.topP ?? 1;
   const maxTokens = body.maxTokens ?? 500;
   const streaming = body.streaming ?? false;
   const autoRouting = body.autoRouting ?? true;
+
+  const fallbackModel = "meta/llama-3.1-70b-instruct";
+
+  // When auto routing is enabled, prefer server-side env model.
+  // When auto routing is disabled, respect the model selected in the UI.
+  const preferredModel = autoRouting
+    ? process.env.NVIDIA_MODEL ?? body.model ?? fallbackModel
+    : body.model ?? process.env.NVIDIA_MODEL ?? fallbackModel;
   const apiKey = process.env.NVIDIA_API_KEY ?? "";
   const baseUrl = process.env.NVIDIA_BASE_URL ?? "";
   const latestUserText = [...recentMessages].reverse().find((message) => message.role === "user")?.content ?? "";
@@ -159,16 +364,38 @@ export async function POST(req: Request) {
     return missingConfigResponse();
   }
 
-  const routing = routeRequest({
+  const heuristicRouting = routeRequest({
     text: latestUserText,
     images,
     preferredModel,
     autoRouting,
   });
 
+  const routing = autoRouting
+    ? await routeWithFastModel({
+        baseUrl,
+        apiKey,
+        text: latestUserText,
+        hasImages: images.length > 0,
+        preferredModel,
+        fallbackRouting: heuristicRouting,
+      })
+    : heuristicRouting;
+
   const memories = await readMemories();
   const longTermMemoryText = formatMemoryForPrompt(memories.slice(0, 20));
   const toolCalls = await detectAndRunTools(latestUserText);
+
+  const localToolReply = getLocalToolReply(toolCalls);
+  if (localToolReply && images.length === 0) {
+    return NextResponse.json({
+      reply: localToolReply,
+      summary,
+      routing,
+      selectedModel: routing.selectedModel,
+      toolCalls,
+    });
+  }
 
   let updatedSummary = summary;
   try {

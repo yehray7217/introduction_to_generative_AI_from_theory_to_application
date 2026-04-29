@@ -18,7 +18,8 @@ type Message = {
 const TARGET_RATIO = 0.3;
 
 export default function HomePage() {
-  const [model, setModel] = useState("meta/llama-3.1-70b-instruct");
+  const [model, setModel] = useState("openai/gpt-oss-120b");
+  // const [model, setModel] = useState("meta/llama-3.1-70b-instruct");
   const [systemPrompt, setSystemPrompt] = useState(
     "You are a powerful HW2 chatbot. You can use long-term memory, image understanding, auto routing, and local MCP-style tools. Answer clearly and mention tool results when tools are used."
   );

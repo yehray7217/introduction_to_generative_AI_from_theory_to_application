@@ -72,7 +72,26 @@ export default function ChatMessage({
         )}
 
         <div className="prose prose-sm max-w-none dark:prose-invert">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content || (isUser ? "" : "...")}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              img: ({ src, alt, ...props }) => {
+                const safeSrc = typeof src === "string" ? src.trim() : "";
+
+                if (!safeSrc) {
+                  return (
+                    <span className="text-xs text-gray-500">
+                      [Image output unavailable]
+                    </span>
+                  );
+                }
+
+                return <img src={safeSrc} alt={alt ?? ""} {...props} />;
+              },
+            }}
+          >
+            {content || (isUser ? "" : "...")}
+          </ReactMarkdown>
         </div>
 
         {routing && (

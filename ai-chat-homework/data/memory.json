@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "id": "aa257dae-02a5-406b-9795-59d99f34eddd",
+    "key": "my_name_is_ray_and_i_prefer_concise_answers",
+    "value": "my name is Ray and I prefer concise answers.",
+    "source": "tool",
+    "createdAt": "2026-04-29T04:37:18.180Z",
+    "updatedAt": "2026-04-29T04:37:18.180Z"
+  }
+]
