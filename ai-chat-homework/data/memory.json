@@ -1,26 +1,10 @@
 [
   {
-    "id": "ffad2327-c442-4d6a-9109-c5d11792a31e",
-    "key": "i_like_playing_football",
-    "value": "I like playing football",
-    "source": "manual",
-    "createdAt": "2026-04-29T12:24:22.861Z",
-    "updatedAt": "2026-04-29T12:24:22.861Z"
-  },
-  {
-    "id": "e62ff91c-1f20-46cc-9b5f-2bca3a89cae8",
-    "key": "my_name_is_ray",
-    "value": "my name is ray",
-    "source": "manual",
-    "createdAt": "2026-04-29T12:22:08.770Z",
-    "updatedAt": "2026-04-29T12:22:08.770Z"
-  },
-  {
-    "id": "5c57102e-0400-4261-af39-f650899b217c",
-    "key": "i_am_ray",
-    "value": "i am ray",
-    "source": "manual",
-    "createdAt": "2026-04-29T11:12:29.715Z",
-    "updatedAt": "2026-04-29T11:12:29.715Z"
+    "id": "fdb8d5bb-4bad-4000-a12e-96ae5b55ead5",
+    "key": "remember_that_my_name_is_ray_and_i_prefer_concis",
+    "value": "Remember that my name is Ray and I prefer concise answers.",
+    "source": "tool",
+    "createdAt": "2026-04-29T15:23:33.880Z",
+    "updatedAt": "2026-04-29T15:23:33.880Z"
   }
 ]

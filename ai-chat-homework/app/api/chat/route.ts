@@ -137,6 +137,68 @@ function buildFinalMessages({
   return finalMessages;
 }
 
+function cleanMemoryValue(value: string): string {
+  return value
+    .replace(/^remember that\s+/i, "")
+    .replace(/^please remember that\s+/i, "")
+    .replace(/^note that\s+/i, "")
+    .replace(/^save that\s+/i, "")
+    .replace(/^store that\s+/i, "")
+    .trim()
+    .replace(/\.$/, "");
+}
+
+function formatMemoryRecall(memories: Array<{ value?: string; key?: string }>): string {
+  const cleaned = memories
+    .map((memory) => cleanMemoryValue(memory.value ?? memory.key ?? ""))
+    .filter(Boolean);
+
+  const nameMemory = cleaned.find((item) =>
+    /my name is/i.test(item)
+  );
+
+  const conciseMemory = cleaned.find((item) =>
+    /prefer concise answers/i.test(item)
+  );
+
+  const footballMemory = cleaned.find((item) =>
+    /like playing football/i.test(item)
+  );
+
+  const parts: string[] = [];
+
+  if (nameMemory) {
+    const nameMatch = nameMemory.match(/my name is\s+([A-Za-z0-9_-]+)/i);
+    if (nameMatch) {
+      parts.push(`Your name is ${nameMatch[1]}`);
+    } else {
+      parts.push(nameMemory);
+    }
+  }
+
+  if (conciseMemory) {
+    parts.push("you prefer concise answers");
+  }
+
+  if (footballMemory) {
+    parts.push("you like playing football");
+  }
+
+  const used = new Set([nameMemory, conciseMemory, footballMemory].filter(Boolean));
+
+  for (const item of cleaned) {
+    if (!used.has(item)) {
+      parts.push(item);
+    }
+  }
+
+  if (parts.length === 0) {
+    return "I do not have any saved information about you yet.";
+  }
+
+  return parts.join(". ") + ".";
+}
+
 function getLocalToolReply(toolCalls: ToolCallLog[]): string | null {
   const calculatorCall = toolCalls.find((call) => call.name === "calculator");
   if (calculatorCall) {
@@ -152,22 +214,25 @@ function getLocalToolReply(toolCalls: ToolCallLog[]): string | null {
   const saveMemoryCall = toolCalls.find((call) => call.name === "save_memory");
   if (saveMemoryCall) {
     const output = saveMemoryCall.output as { value?: string };
-    return `Saved to long-term memory: ${output.value ?? "memory item"}`;
+    const cleaned = cleanMemoryValue(output.value ?? "that information");
+
+    return `Got it. I will remember that ${cleaned}.`;
   }
 
-  const searchMemoryCall = toolCalls.find((call) => call.name === "search_memory");
+  const searchMemoryCall = toolCalls.find(
+    (call) => call.name === "search_memory"
+  );
   if (searchMemoryCall) {
-    const output = searchMemoryCall.output as Array<{ key?: string; value?: string }>;
+    const output = searchMemoryCall.output as Array<{
+      key?: string;
+      value?: string;
+    }>;
 
     if (!Array.isArray(output) || output.length === 0) {
-      return "I do not have any saved long-term memory about you yet.";
+      return "I do not know much about you yet.";
     }
 
-    const memories = output
-      .map((memory) => `- ${memory.value ?? memory.key ?? "memory item"}`)
-      .join("\n");
-
-    return `From my long-term memory, I remember:\n${memories}`;
+    return formatMemoryRecall(output);
   }
 
   const timeCall = toolCalls.find((call) => call.name === "get_current_time");
@@ -499,16 +564,29 @@ export async function POST(req: Request) {
     toolInput: {},
   };
 
-  const routing: RoutingDecision = autoRouting
-    ? await routeWithFastModel({
-        baseUrl,
-        apiKey,
-        text: latestUserText,
-        hasImages: images.length > 0,
-        preferredModel,
-        fallbackRouting: heuristicDecision,
-      })
-    : heuristicDecision;
+  const routing: RoutingDecision =
+    images.length > 0
+      ? {
+          taskType: "vision",
+          selectedModel:
+            process.env.NVIDIA_VISION_MODEL ??
+            "meta/llama-3.2-11b-vision-instruct",
+          reason:
+            "Image attachment detected, so the request is routed directly to a vision-capable model.",
+          shouldUseTool: false,
+          toolName: "none",
+          toolInput: {},
+        }
+      : autoRouting
+        ? await routeWithFastModel({
+            baseUrl,
+            apiKey,
+            text: latestUserText,
+            hasImages: images.length > 0,
+            preferredModel,
+            fallbackRouting: heuristicDecision,
+          })
+        : heuristicDecision;
 
   const memories = await readMemories();
   const longTermMemoryText = formatMemoryForPrompt(memories.slice(0, 20));
