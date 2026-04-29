@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { detectAndRunTools } from "../../../lib/tools";
+import { runLocalTool } from "../../../lib/tools";
 import { formatMemoryForPrompt, readMemories } from "../../../lib/memory-store";
 import { routeRequest } from "../../../lib/router";
 import type { ChatMessage, ImageAttachment, ToolCallLog } from "../../../lib/types";
@@ -179,16 +179,20 @@ function getLocalToolReply(toolCalls: ToolCallLog[]): string | null {
   return null;
 }
 
+type ToolName =
+  | "calculator"
+  | "get_current_time"
+  | "save_memory"
+  | "search_memory"
+  | "none";
+
 type RoutingDecision = {
-  taskType:
-    | "general"
-    | "vision"
-    | "coding"
-    | "math"
-    | "memory"
-    | "tool";
+  taskType: "general" | "vision" | "coding" | "math" | "memory" | "tool";
   selectedModel: string;
   reason: string;
+  shouldUseTool: boolean;
+  toolName: ToolName;
+  toolInput: Record<string, unknown>;
 };
 
 function extractJsonObject(text: string) {
@@ -252,21 +256,26 @@ Available task types:
 - memory: saving or retrieving long-term user memory, preferences, or personal facts
 - tool: requests that clearly require a local tool such as current time
 
-Return JSON only in this format:
+Return JSON only:
 {
   "taskType": "general | vision | coding | math | memory | tool",
+  "shouldUseTool": true,
+  "toolName": "calculator | get_current_time | save_memory | search_memory | none",
+  "toolInput": {},
   "reason": "short reason"
 }
 
-Important classification rules:
-1. If the user is ASKING ABOUT the content of an uploaded image, choose "vision".
-2. If an image is attached and the user asks "what is in this image?", "describe this image", "read the text in this image", or similar, choose "vision".
-3. Do NOT choose "general" for image creation requests.
-4. Use "general" only for normal text conversation when none of the above categories fit.
-5. If the user asks to remember something or asks what you remember, choose "memory".
-6. If the user asks to calculate a numeric expression, choose "math".
-7. If the user asks about code or debugging, choose "coding".
-8. If the user asks for current time or another clear local tool action, choose "tool".
+Rules:
+- If hasImages is true, choose vision and toolName must be none.
+- If the user asks to remember, save, note, or store a stable personal fact or preference, choose memory and toolName must be save_memory.
+- If the user asks what you remember, who they are, whether you know them, or asks about their saved preferences, choose memory and toolName must be search_memory.
+- If the user asks to calculate a numeric expression, choose math and toolName must be calculator.
+- If the user asks for current time, current date, today, or now, choose tool and toolName must be get_current_time.
+- If the user asks about code, debugging, TypeScript, JavaScript, React, Next.js, Python, CUDA, or software engineering, choose coding and toolName must be none.
+- For normal conversation, explanation, writing, or summarization, choose general and toolName must be none.
+- Do not answer the user. Only classify and plan.
+- Do not use keyword substring matching. Understand the user's intent semantically.
+- The word "know" is not a time request.
 
 Examples:
 - "What is in this image?" + hasImages=true => vision
@@ -293,6 +302,9 @@ You must output JSON only. Do not answer the user.
 
     const parsed = extractJsonObject(routerReply) as {
       taskType?: RoutingDecision["taskType"];
+      shouldUseTool?: boolean;
+      toolName?: ToolName;
+      toolInput?: Record<string, unknown>;
       reason?: string;
     } | null;
 
@@ -305,14 +317,32 @@ You must output JSON only. Do not answer the user.
       "tool",
     ];
 
+    const allowedToolNames: ToolName[] = [
+      "calculator",
+      "get_current_time",
+      "save_memory",
+      "search_memory",
+      "none",
+    ];
+
     const taskType =
       parsed?.taskType && allowedTaskTypes.includes(parsed.taskType)
         ? parsed.taskType
         : fallbackRouting.taskType;
 
+    const toolName =
+      parsed?.toolName && allowedToolNames.includes(parsed.toolName)
+        ? parsed.toolName
+        : "none";
+
+    const shouldUseTool = Boolean(parsed?.shouldUseTool) && toolName !== "none";
+
     return {
       taskType,
       selectedModel: modelMap[taskType],
+      shouldUseTool,
+      toolName,
+      toolInput: parsed?.toolInput ?? {},
       reason: `Fast router model (${fastModel}) decision: ${
         parsed?.reason ?? fallbackRouting.reason
       }`,
@@ -320,8 +350,97 @@ You must output JSON only. Do not answer the user.
   } catch {
     return {
       ...fallbackRouting,
+      shouldUseTool: false,
+      toolName: "none",
+      toolInput: {},
       reason: `Fast router failed. Fallback heuristic used: ${fallbackRouting.reason}`,
     };
+  }
+}
+
+function normalizeToolInput(
+  toolName: ToolName,
+  toolInput: Record<string, unknown>,
+  latestUserText: string
+): Record<string, unknown> {
+  if (toolName === "calculator") {
+    return {
+      expression:
+        typeof toolInput.expression === "string" && toolInput.expression.trim()
+          ? toolInput.expression.trim()
+          : latestUserText,
+    };
+  }
+
+  if (toolName === "get_current_time") {
+    return {
+      timeZone:
+        typeof toolInput.timeZone === "string" && toolInput.timeZone.trim()
+          ? toolInput.timeZone.trim()
+          : "Asia/Taipei",
+    };
+  }
+
+  if (toolName === "save_memory") {
+    const value =
+      typeof toolInput.value === "string" && toolInput.value.trim()
+        ? toolInput.value.trim()
+        : latestUserText;
+
+    const key =
+      typeof toolInput.key === "string" && toolInput.key.trim()
+        ? toolInput.key.trim()
+        : undefined;
+
+    return key ? { key, value } : { value };
+  }
+
+  if (toolName === "search_memory") {
+    return {
+      query:
+        typeof toolInput.query === "string" && toolInput.query.trim()
+          ? toolInput.query.trim()
+          : latestUserText,
+    };
+  }
+
+  return {};
+}
+
+async function runPlannedToolCall(
+  routing: RoutingDecision,
+  latestUserText: string
+): Promise<ToolCallLog[]> {
+  if (!routing.shouldUseTool || routing.toolName === "none") {
+    return [];
+  }
+
+  const input = normalizeToolInput(
+    routing.toolName,
+    routing.toolInput ?? {},
+    latestUserText
+  );
+
+  try {
+    const output = await runLocalTool(routing.toolName, input);
+
+    return [
+      {
+        name: routing.toolName,
+        input,
+        output,
+      },
+    ];
+  } catch (error) {
+    return [
+      {
+        name: routing.toolName,
+        input,
+        output: {
+          error: error instanceof Error ? error.message : "Unknown tool error",
+        },
+      },
+    ];
   }
 }
 
@@ -371,20 +490,29 @@ export async function POST(req: Request) {
     autoRouting,
   });
 
-  const routing = autoRouting
+  const heuristicDecision: RoutingDecision = {
+    taskType: heuristicRouting.taskType,
+    selectedModel: heuristicRouting.selectedModel,
+    reason: heuristicRouting.reason,
+    shouldUseTool: false,
+    toolName: "none",
+    toolInput: {},
+  };
+
+  const routing: RoutingDecision = autoRouting
     ? await routeWithFastModel({
         baseUrl,
         apiKey,
         text: latestUserText,
         hasImages: images.length > 0,
         preferredModel,
-        fallbackRouting: heuristicRouting,
+        fallbackRouting: heuristicDecision,
       })
-    : heuristicRouting;
+    : heuristicDecision;
 
   const memories = await readMemories();
   const longTermMemoryText = formatMemoryForPrompt(memories.slice(0, 20));
-  const toolCalls = await detectAndRunTools(latestUserText);
+  const toolCalls = await runPlannedToolCall(routing, latestUserText);
 
   const localToolReply = getLocalToolReply(toolCalls);
   if (localToolReply && images.length === 0) {

@@ -127,7 +127,13 @@ export async function detectAndRunTools(text: string): Promise<ToolCallLog[]> {
     }
   }
 
-  if (lower.includes("time") || lower.includes("date") || lower.includes("today") || lower.includes("now") || lower.includes("幾點") || lower.includes("今天") || lower.includes("現在")) {
+  const asksTime =
+    /\b(time|date|today)\b/i.test(text) ||
+    lower.includes("幾點") ||
+    lower.includes("今天") ||
+    lower.includes("現在");
+
+  if (asksTime) {
     const input = { timeZone: "Asia/Taipei" };
     const output = await runLocalTool("get_current_time", input);
     calls.push({ name: "get_current_time", input, output });
